@@ -68,7 +68,7 @@ Socket D Socket E Socket F
 
 ```bash
 # 克隆项目
-git clone https://github.com/yourname/ArcNet.git
+git clone https://github.com/sunnyuioa/ArcNet.git
 cd ArcNet
 
 # 编译
@@ -146,6 +146,6 @@ MIT License
 📧 联系方式
 作者：Your Name
 
-Email：your.email@example.com
+Email：jxgz777@qq.com@example.com
 
-GitHub：https://github.com/yourname/ArcNet
+GitHub：https://github.com/sunnyuioa/ArcNet
