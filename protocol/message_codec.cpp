@@ -1,5 +1,4 @@
 #include"protocol/message_codec.h"
-
 CMessageOut::CMessageOut() {
     clear();
 }
@@ -58,6 +57,7 @@ void CMessageOut::writeFloat(float value) {
 void CMessageOut::writeString(const std::string &str, int length) {
     int len = length < 0 ? str.size() : length;
     if (mPos + len > MSG_MAX) return;
+    std::cout<<"3";
     memcpy(msg.body + mPos, str.c_str(), len);
     mPos += len;
     msg.header.bodyLen = mPos;

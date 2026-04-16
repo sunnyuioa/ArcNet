@@ -5,7 +5,7 @@
 #include <string>
 #include <cstring>
 #include <cstdint>
-
+#include<iostream>
 class CMessageOut
 {
 public:
