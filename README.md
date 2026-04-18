@@ -99,7 +99,7 @@ g++ -std=c++11 -pthread benchmark.cpp \
 
 # 运行压测（1000连接，每连接100条消息）
 ./bin/benchmark 1000 100
-📁 目录结构
+📁 目录结构![alt text](image.png)
 ArcNet/
 ├── buffer/                 # 环形缓冲区
 │   ├── ring_buffer.h

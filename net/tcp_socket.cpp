@@ -99,7 +99,7 @@ void Socket::_OnConnect()
     OnConnect();
 }
 
-/*bool Socket::Send(CMessageOut &out)
+bool Socket::Send(CMessageOut &out)
 {
     cout<<"正在尝试发送消息";
     if (out.getLength() <= 0 || out.getLength() > 10240 - sizeof(MsgHeader))
@@ -139,16 +139,10 @@ void Socket::_OnConnect()
     {
         rv = false;
     }
-
     BurstEnd();
     return rv;
-}*/
-bool Socket::Send(CMessageOut &out)
-{
-   string msg=out.getData().body;
-   send(m_fd,(const char*)msg.c_str(), out.getLength(), 0);
-   return true;
 }
+
 void Socket::WriteCallback()
 {
     if (writeBuffer.GetSize() == 0) {
@@ -161,9 +155,9 @@ void Socket::WriteCallback()
 
 bool Socket::BurstSend(const uint8_t* Bytes, uint32_t Size)
 {
-   /* return writeBuffer.Write(Bytes, Size);*/
-  /* ::socket_send(m_fd, (const char*)Bytes, Size);*/
-   return true;
+ 
+  return ::send(m_fd, (const char*)Bytes, Size,0);
+  
 }
 
 string Socket::GetRemoteIP()
@@ -192,7 +186,7 @@ void Socket::Delete()
     SocketOps::CloseSocket(m_fd);
 }
 
-/*void Socket::OnRead(uint32_t size)
+void Socket::OnRead(uint32_t size)
 {
     cout<<"vvrvvrrbrb";
     char tmp_buf[4096];
@@ -256,7 +250,6 @@ void Socket::Delete()
         delete[] msgData;
     }
 }
-*/
 /*void Socket::OnRead(uint32_t size)
 {
     cout << "OnRead called" << endl;
@@ -341,53 +334,7 @@ void Socket::Delete()
         delete[] msgData;
     }
 }*/
-/*void Socket::OnRead(uint32_t size)
-{
-    char buf[4096];
-    int n = recv(m_fd, buf, sizeof(buf) - 1, 0);
-    if (n > 0) {
-        buf[n] = '\0';
-        std::cout << "收到: " << buf << std::endl;
-        // 直接 echo 回去
-        send(m_fd, buf, n, 0);
-    } else if (n == 0) {
-        std::cout << "客户端断开" << std::endl;
-        Disconnect();
-    } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-        perror("recv error");
-        Disconnect();
-    }
-}*/
-void Socket::OnRead(uint32_t size)
-{
-    char buf[4096];
-    int n = 0;
-    cout<<"         afafafefeaef  ";
-    
-    // 循环读取直到读完所有数据（ET 模式需要）
-    while (true) {
-        n = recv(m_fd, buf, sizeof(buf) - 1, 0);
-        if (n > 0) {
-            buf[n] = '\0';
-            std::cout << "收到: " << buf << std::endl;
-            // echo 回去
-            send(m_fd, buf, n, 0);
-        } else if (n == 0) {
-            std::cout << "客户端断开" << std::endl;
-            Disconnect();
-            return;
-        } else {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // 数据读完了，退出循环
-                break;
-            } else {
-                perror("recv error");
-                Disconnect();
-                return;
-            }
-        }
-    }
-}
+
 void Socket::OnConnect()
 {
     // 可被子类重写
@@ -412,8 +359,3 @@ void Socket::PostEvent(uint32_t events)
 {
     // 事件分发
 }
-
-/*bool Socket::Send(const uint8_t* Bytes, uint32_t Size)
-{
-    return writeBuffer.Write(Bytes, Size);
-}*/
