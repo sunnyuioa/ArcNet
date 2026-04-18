@@ -2,7 +2,8 @@
 #include<cstdint>
 #include<cstring>
 #include<iostream>
-
+#include<sys/types.h>
+#include<sys/socket.h>
 using namespace std;
 
 Socket::Socket(SOCKET fd, uint32_t sendbuffersize, uint32_t recvbuffersize) : m_fd(fd), m_connected(false), m_deleted(false), m_writeLock(0)
@@ -63,7 +64,7 @@ void Socket::BurstPush()
 }
 
 bool Socket::Connect(const char* Address, uint32_t Port)
-{
+{ 
     struct hostent* ci = gethostbyname(Address);
     if(ci == 0)
         return false;
@@ -98,8 +99,9 @@ void Socket::_OnConnect()
     OnConnect();
 }
 
-bool Socket::Send(CMessageOut &out)
+/*bool Socket::Send(CMessageOut &out)
 {
+    cout<<"正在尝试发送消息";
     if (out.getLength() <= 0 || out.getLength() > 10240 - sizeof(MsgHeader))
         return false;
 
@@ -107,7 +109,7 @@ bool Socket::Send(CMessageOut &out)
         return false;
 
     bool rv = true;
-
+    cout<<"要发消息了哦";
     try
     {
         BurstBegin();
@@ -140,8 +142,13 @@ bool Socket::Send(CMessageOut &out)
 
     BurstEnd();
     return rv;
+}*/
+bool Socket::Send(CMessageOut &out)
+{
+   string msg=out.getData().body;
+   send(m_fd,(const char*)msg.c_str(), out.getLength(), 0);
+   return true;
 }
-
 void Socket::WriteCallback()
 {
     if (writeBuffer.GetSize() == 0) {
@@ -154,7 +161,9 @@ void Socket::WriteCallback()
 
 bool Socket::BurstSend(const uint8_t* Bytes, uint32_t Size)
 {
-    return writeBuffer.Write(Bytes, Size);
+   /* return writeBuffer.Write(Bytes, Size);*/
+  /* ::socket_send(m_fd, (const char*)Bytes, Size);*/
+   return true;
 }
 
 string Socket::GetRemoteIP()
@@ -404,7 +413,7 @@ void Socket::PostEvent(uint32_t events)
     // 事件分发
 }
 
-bool Socket::Send(const uint8_t* Bytes, uint32_t Size)
+/*bool Socket::Send(const uint8_t* Bytes, uint32_t Size)
 {
     return writeBuffer.Write(Bytes, Size);
-}
+}*/

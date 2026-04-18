@@ -5,7 +5,6 @@
 
 #include <cstdint>
 #include <cstring>
-
 constexpr uint32_t PROTO_MAGIC = 0xABCD1234;
 constexpr uint16_t MSG_Min = 16384;
 constexpr uint16_t MSG_MAX = 32767;

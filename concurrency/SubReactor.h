@@ -64,10 +64,6 @@ public:
     ev.data.fd = client_fd;
     ev.events = // 把这行：
 ev.events = EPOLLIN | EPOLLRDHUP;
-
-// 确保没有 EPOLLET（你当前已经没有了，但需要确认）
-// 当前代码是正确的，问题在于读数据不够完整 // 关键：必须有 EPOLLOUT
-    
     if (epoll_ctl(epfd_, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
         perror("epoll_ctl EPOLL_CTL_ADD failed");
         close(client_fd);

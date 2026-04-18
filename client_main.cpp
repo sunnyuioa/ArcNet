@@ -8,7 +8,9 @@ int main() {
     
     std::cout << "正在连接服务器 127.0.0.1:8888 ..." << std::endl;
     
-    Socket* s = ConnectTCPSocket<Socket>("127.0.0.1", 8888);
+    
+    Socket* s = new Socket(0,300,300);
+    s->Connect("127.0.0.1", 8888);
     if (!s || !s->IsConnected()) {
         std::cerr << "连接失败！请确保服务器已启动" << std::endl;
         return -1;

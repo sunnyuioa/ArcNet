@@ -1,6 +1,5 @@
 #ifndef _MOL_NET_MESSAGE_H_INCL
 #define _MOL_NET_MESSAGE_H_INCL
-
 #include "message.h"
 #include <string>
 #include <cstring>
@@ -32,7 +31,7 @@ public:
     void writeFloat(float value);
     void write64(int64_t value);
     void writeString(const std::string &str, int length = -1);
-    const ProtoMessage getData() const { return this->msg; }
+    const ProtoMessage getData()const { return this->msg; }
     unsigned int getLength() const { return mLength; }
     
 private:

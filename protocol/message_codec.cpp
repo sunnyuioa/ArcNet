@@ -55,9 +55,10 @@ void CMessageOut::writeFloat(float value) {
 }
 
 void CMessageOut::writeString(const std::string &str, int length) {
+    std::cout<<"正在写入字符串: " << str << " 长度: " << length ;
     int len = length < 0 ? str.size() : length;
     if (mPos + len > MSG_MAX) return;
-    std::cout<<"3";
+    std::cout<<"写入成功: " << str << " 长度: " << len ;
     memcpy(msg.body + mPos, str.c_str(), len);
     mPos += len;
     msg.header.bodyLen = mPos;
