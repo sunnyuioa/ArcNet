@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>恋物语｜AI 恋人</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background: radial-gradient(circle at 20% 30%, #1a0a2e, #0d0d1a);
+            font-family: 'Segoe UI', 'Poppins', 'Quicksand', '微软雅黑', system-ui, sans-serif;
+            position: relative;
+        }
+
+        /* 粒子背景装饰 */
+        .particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .particle {
+            position: absolute;
+            background: rgba(255, 182, 218, 0.4);
+            border-radius: 50%;
+            animation: float 12s infinite ease-in-out;
+            box-shadow: 0 0 12px rgba(255, 128, 192, 0.5);
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0) rotate(0deg); opacity: 0.3; }
+            50% { transform: translateY(-40px) rotate(8deg); opacity: 0.8; }
+        }
+
+        /* 主容器 */
+        .chat-app {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 12px;
+        }
+
+        /* 聊天卡片 */
+        .chat-card {
+            width: 100%;
+            max-width: 550px;
+            height: 95vh;
+            max-height: 850px;
+            background: rgba(20, 12, 35, 0.65);
+            backdrop-filter: blur(24px);
+            border-radius: 48px;
+            box-shadow: 0 25px 55px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 160, 200, 0.2) inset;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        /* 头部 */
+        .chat-header {
+            padding: 18px 22px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 200, 220, 0.25);
+            background: rgba(0, 0, 0, 0.2);
+        }
+        .header-title {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+        .header-title h1 {
+            font-size: 1.7rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #FFB7D2, #FF87B8);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            letter-spacing: 2px;
+        }
+        .header-title span {
+            font-size: 0.75rem;
+            color: #ffa7cf;
+            opacity: 0.7;
+        }
+        .settings-btn {
+            background: rgba(255, 255, 255, 0.12);
+            border: none;
+            width: 42px;
+            height: 42px;
+            border-radius: 30px;
+            font-size: 1.5rem;
+            cursor: pointer;
+            backdrop-filter: blur(5px);
+            transition: 0.2s;
+            color: #ffc0e0;
+        }
+        .settings-btn:hover {
+            background: rgba(255, 120, 170, 0.5);
+            transform: rotate(15deg);
+        }
+
+        /* 双头像栏 */
+        .avatars-bar {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            gap: 20px;
+            border-bottom: 1px solid rgba(255, 200, 230, 0.2);
+        }
+        .avatar-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            flex: 1;
+        }
+        .avatar-circle {
+            width: 65px;
+            height: 65px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #ff99cc;
+            box-shadow: 0 0 15px rgba(255, 100, 150, 0.5);
+            background: #2a1a3a;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .avatar-circle:hover {
+            transform: scale(1.02);
+            border-color: #ff66aa;
+        }
+        .avatar-name {
+            font-size: 0.75rem;
+            color: #ffccee;
+            font-weight: 500;
+        }
+        .avatar-label {
+            font-size: 0.65rem;
+            background: rgba(255, 200, 230, 0.2);
+            padding: 2px 10px;
+            border-radius: 20px;
+            color: #ffb3da;
+            cursor: pointer;
+        }
+
+        /* 聊天区域 - 【优化后完美自适应背景】 */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            /* 背景图完美适配配置 */
+            background-size: cover !important;
+            background-position: center center !important;
+            background-repeat: no-repeat !important;
+            background-attachment: fixed !important;
+            background-blend-mode: overlay;
+            background-color: rgba(20, 12, 35, 0.4);
+        }
+        .chat-messages::-webkit-scrollbar {
+            width: 4px;
+        }
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #ff99cc;
+            border-radius: 10px;
+        }
+
+        /* 气泡 */
+        .message {
+            max-width: 82%;
+            padding: 10px 16px;
+            border-radius: 26px;
+            line-height: 1.45;
+            font-size: 0.95rem;
+            word-break: break-word;
+            animation: fadeInUp 0.2s ease;
+            position: relative;
+        }
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .user-message {
+            align-self: flex-end;
+            background: linear-gradient(135deg, #ff88bc, #ff60a8);
+            color: white;
+            border-bottom-right-radius: 6px;
+            box-shadow: 0 6px 14px rgba(255, 80, 140, 0.3);
+        }
+        .ai-message {
+            align-self: flex-start;
+            background: rgba(30, 20, 45, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 160, 200, 0.5);
+            color: #ffeef4;
+            border-bottom-left-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+        .loading {
+            background: rgba(50, 30, 65, 0.7);
+            backdrop-filter: blur(8px);
+            color: #ffb7d2;
+            font-style: normal;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border-radius: 28px;
+        }
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+        .typing-dots span {
+            width: 7px;
+            height: 7px;
+            background: #ff99cc;
+            border-radius: 50%;
+            animation: pulseDot 1.3s infinite;
+        }
+        .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes pulseDot {
+            0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+            30% { transform: translateY(-6px); opacity: 1; }
+        }
+
+        /* 输入栏 */
+        .input-area {
+            padding: 16px 18px;
+            background: rgba0, 0, 0, 0.3);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255, 200, 230, 0.3);
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        #userInput {
+            flex: 1;
+            background: rgba(25, 15, 40, 0.8);
+            border: 1px solid #ff99cc66;
+            border-radius: 32px;
+            padding: 14px 18px;
+            color: #ffeef4;
+            font-size: 0.9rem;
+            outline: none;
+            transition: 0.2s;
+        }
+        #userInput:focus {
+            border-color: #ff66aa;
+            box-shadow: 0 0 10px #ff88bb55;
+        }
+        #sendBtn {
+            background: linear-gradient(145deg, #ff77b3, #ff4490);
+            border: none;
+            width: 50px;
+            height: 50px;
+            border-radius: 40px;
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: white;
+            cursor: pointer;
+            transition: 0.15s;
+            box-shadow: 0 4px 12px #ff449055;
+        }
+        #sendBtn:active {
+            transform: scale(0.94);
+        }
+        #sendBtn:disabled {
+            opacity: 0.5;
+            transform: none;
+        }
+
+        /* 弹窗 */
+        .settings-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(15px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-glass {
+            background: rgba(20, 10, 35, 0.95);
+            backdrop-filter: blur(18px);
+            width: 88%;
+            max-width: 450px;
+            border-radius: 42px;
+            padding: 28px 22px;
+            border: 1px solid #ffaad4;
+            box-shadow: 0 25px 45px rgba(0, 0, 0, 0.5);
+        }
+        .modal-title {
+            font-size: 1.6rem;
+            font-weight: bold;
+            text-align: center;
+            color: #ffbfdf;
+            margin-bottom: 20px;
+        }
+        .setting-field {
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .setting-field label {
+            font-weight: 600;
+            color: #ffccee;
+            letter-spacing: 1px;
+        }
+        .setting-field input, .setting-field textarea {
+            background: #2a1d3a;
+            border: 1px solid #ff9fcf;
+            border-radius: 28px;
+            padding: 12px 16px;
+            color: #ffeef4;
+            resize: vertical;
+            font-family: inherit;
+        }
+        .modal-buttons {
+            display: flex;
+            gap: 14px;
+            margin-top: 20px;
+        }
+        .modal-btn {
+            flex: 1;
+            padding: 12px;
+            border-radius: 40px;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .btn-save {
+            background: #ff66aa;
+            color: white;
+        }
+        .btn-cancel {
+            background: #3a2a4e;
+            color: #ffc0e0;
+        }
+        .timeout-hint {
+            text-align: center;
+            font-size: 10px;
+            color: #ff99bbaa;
+            margin-top: 6px;
+        }
+    </style>
+</head>
+<body>
+<div class="particles" id="particles"></div>
+
+<div class="chat-app">
+    <div class="chat-card">
+        <div class="chat-header">
+            <div class="header-title">
+                <h1>恋·物语</h1>
+                <span>♡ 心跳频率</span>
+            </div>
+            <button class="settings-btn" id="settingsBtn">✨</button>
+        </div>
+
+        <!-- 双头像 + 换头像 -->
+        <div class="avatars-bar">
+            <div class="avatar-item">
+                <img id="aiAvatar" class="avatar-circle" src="https://picsum.photos/130/130?random=101" alt="AI">
+                <div class="avatar-name">✨ 恋君</div>
+                <label class="avatar-label" onclick="document.getElementById('aiAvatarUp').click()">换头像</label>
+                <input type="file" id="aiAvatarUp" accept="image/*" style="display:none">
+            </div>
+            <div class="avatar-item">
+                <img id="myAvatar" class="avatar-circle" src="https://picsum.photos/130/130?random=202" alt="Me">
+                <div class="avatar-name">🌸 我</div>
+                <label class="avatar-label" onclick="document.getElementById('myAvatarUp').click()">换头像</label>
+                <input type="file" id="myAvatarUp" accept="image/*" style="display:none">
+            </div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages"></div>
+
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="轻声诉说……" autocomplete="off">
+            <button id="sendBtn">❤</button>
+        </div>
+        <div class="timeout-hint">✨ AI 会思考，最长等一分钟~</div>
+    </div>
+</div>
+
+<!-- 设置弹窗 -->
+<div class="settings-modal" id="settingsModal">
+    <div class="modal-glass">
+        <div class="modal-title">♡ 恋物语·设定 ♡</div>
+        <div class="setting-field">
+            <label>🖼️ 聊天背景图</label>
+            <input type="file" id="bgImageInput" accept="image/*">
+        </div>
+        <div class="setting-field">
+            <label>📖 恋人性格 (character)</label>
+            <textarea id="characterInput" rows="3" placeholder="例如：温柔体贴，喜欢叫宝宝，有点小霸道，会说情话..."></textarea>
+        </div>
+        <div class="modal-buttons">
+            <button class="modal-btn btn-cancel" id="cancelBtn">取消</button>
+            <button class="modal-btn btn-save" id="saveBtn">💾 保存设定</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ========== 你的服务器地址已填好 ==========
+    const SERVER_URL = "http://10.237.155.46:8888/chat";
+
+    const DEFAULT_CHARACTER = "你是用户的AI男友，温柔又带点霸道，会叫我宝宝，说话带颜文字，超级宠溺。";
+
+    let isLoading = false;
+    let currentCharacter = localStorage.getItem('character') || DEFAULT_CHARACTER;
+    let currentBg = localStorage.getItem('chatBg') || '';
+
+    // 头像存储
+    let aiAvatarUrl = localStorage.getItem('aiAvatar') || "https://picsum.photos/130/130?random=101";
+    let myAvatarUrl = localStorage.getItem('myAvatar') || "https://picsum.photos/130/130?random=202";
+
+    const chatContainer = document.getElementById('chatMessages');
+    const settingsModal = document.getElementById('settingsModal');
+    const saveBtn = document.getElementById('saveBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const bgInput = document.getElementById('bgImageInput');
+    const characterInput = document.getElementById('characterInput');
+    const aiAvatarImg = document.getElementById('aiAvatar');
+    const myAvatarImg = document.getElementById('myAvatar');
+
+    // 【统一初始化背景样式】
+    function setBgStyle(bgUrl) {
+        if(!bgUrl) return;
+        chatContainer.style.backgroundImage = `url(${bgUrl})`;
+        chatContainer.style.backgroundSize = 'cover';
+        chatContainer.style.backgroundPosition = 'center center';
+        chatContainer.style.backgroundRepeat = 'no-repeat';
+        chatContainer.style.backgroundAttachment = 'fixed';
+    }
+
+    // 初始化UI
+    aiAvatarImg.src = aiAvatarUrl;
+    myAvatarImg.src = myAvatarUrl;
+    characterInput.value = currentCharacter;
+    if (currentBg) {
+        setBgStyle(currentBg);
+    }
+
+    // 头像上传
+    document.getElementById('aiAvatarUp').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const url = URL.createObjectURL(file);
+            aiAvatarImg.src = url;
+            localStorage.setItem('aiAvatar', url);
+        }
+    });
+    document.getElementById('myAvatarUp').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const url = URL.createObjectURL(file);
+            myAvatarImg.src = url;
+            localStorage.setItem('myAvatar', url);
+        }
+    });
+
+    // 背景上传预览
+    bgInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const bgUrl = URL.createObjectURL(file);
+            setBgStyle(bgUrl);
+            currentBg = bgUrl;
+        }
+    });
+
+    // 弹窗控制
+    document.getElementById('settingsBtn').onclick = () => settingsModal.style.display = 'flex';
+    cancelBtn.onclick = () => settingsModal.style.display = 'none';
+
+    // 保存人设 + 背景
+    saveBtn.onclick = () => {
+        const newChar = characterInput.value.trim();
+        if (newChar) {
+            currentCharacter = newChar;
+            localStorage.setItem('character', currentCharacter);
+        }
+        
+        if (bgInput.files.length === 0 && currentBg) {
+            localStorage.setItem('chatBg', currentBg);
+        } else if (bgInput.files[0]) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const finalBg = e.target.result;
+                currentBg = finalBg;
+                setBgStyle(finalBg);
+                localStorage.setItem('chatBg', finalBg);
+            };
+            reader.readAsDataURL(bgInput.files[0]);
+        }
+        
+        // 发送人设到服务器 (character 字段)
+        fetch(SERVER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ character: currentCharacter })
+        }).catch(e => console.warn("人设同步失败", e));
+        
+        settingsModal.style.display = 'none';
+        alert('✨ 恋之设定已封存 ✨');
+    };
+
+    function addMessage(role, content, isLoadingMsg = false) {
+        const div = document.createElement('div');
+        if (role === 'loading') {
+            div.className = 'message loading';
+            div.innerHTML = `💕 恋君轻语 <div class="typing-dots"><span>•</span><span>•</span><span>•</span></div>`;
+        } else {
+            div.className = `message ${role === 'user' ? 'user-message' : 'ai-message'}`;
+            div.textContent = content;
+        }
+        chatContainer.appendChild(div);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+        return div;
+    }
+
+    async function sendMessage() {
+        if (isLoading) return;
+        const input = document.getElementById('userInput');
+        const text = input.value.trim();
+        if (!text) return;
+
+        addMessage('user', text);
+        input.value = '';
+
+        const loadingDiv = addMessage('loading');
+        isLoading = true;
+        const sendBtn = document.getElementById('sendBtn');
+        sendBtn.disabled = true;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+        try {
+            const response = await fetch(SERVER_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: text }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) throw new Error('server error');
+            const data = await response.json();
+            const reply = data.reply || data.msg || '嗯～ 再说一遍嘛 💗';
+            loadingDiv.remove();
+            addMessage('ai', reply);
+        } catch (err) {
+            clearTimeout(timeoutId);
+            loadingDiv.remove();
+            if (err.name === 'AbortError') {
+                addMessage('ai', '恋君想了好久好久… 再试一次好不好？💕');
+            } else {
+                addMessage('ai', '心电感应断了一下下，再发一次呗 ✨');
+            }
+        } finally {
+            isLoading = false;
+            sendBtn.disabled = false;
+            document.getElementById('userInput').focus();
+        }
+    }
+
+    document.getElementById('sendBtn').onclick = sendMessage;
+    document.getElementById('userInput').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendMessage();
+    });
+
+    // 开场白 + 粒子效果
+    window.addEventListener('load', () => {
+        addMessage('ai', '宝贝，今晚月色很美 💖 想聊什么呢？');
+        for (let i = 0; i < 35; i++) {
+            let p = document.createElement('div');
+            p.className = 'particle';
+            let size = Math.random() * 12 + 3;
+            p.style.width = size + 'px';
+            p.style.height = size + 'px';
+            p.style.left = Math.random() * 100 + '%';
+            p.style.top = Math.random() * 100 + '%';
+            p.style.animationDelay = Math.random() * 10 + 's';
+            p.style.animationDuration = 8 + Math.random() * 8 + 's';
+            document.getElementById('particles').appendChild(p);
+        }
+    });
+</script>
+</body>
+</html>

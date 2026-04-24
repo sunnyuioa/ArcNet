@@ -30,7 +30,6 @@ struct ProtoMessage
         if (pos + len > MSG_MAX) return;
         ::memcpy(body + pos, data, len);
     }
-
     void clean() {
         ::memset(body, 0, sizeof(body));
     }

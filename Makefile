@@ -1,5 +1,6 @@
 CXX = g++
 CXXFLAGS = -std=c++11 -Wall -O2 -g -pthread
+LDFLAGS = -lstdc++fs
 INCLUDES = -I.
 
 SRC_DIR = .
@@ -11,7 +12,8 @@ COMMON_SRCS = \
     buffer/ring_buffer.cpp \
     net/socket_ops.cpp \
     net/tcp_socket.cpp \
-    protocol/message_codec.cpp
+    protocol/message_codec.cpp \
+    storage_manager/storage_manager.cpp
 
 COMMON_OBJS = $(addprefix $(BUILD_DIR)/, $(notdir $(COMMON_SRCS:.cpp=.o)))
 
@@ -31,16 +33,17 @@ all: $(BIN_DIR)/arcnet_server $(BIN_DIR)/arcnet_client $(BIN_DIR)/benchmark
 
 $(BIN_DIR)/arcnet_server: $(SERVER_OBJS)
 	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(INCLUDES)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(INCLUDES) $(LDFLAGS)
 
 $(BIN_DIR)/arcnet_client: $(CLIENT_OBJS)
 	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(INCLUDES)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(INCLUDES) $(LDFLAGS)
 
 $(BIN_DIR)/benchmark: $(BENCHMARK_OBJS)
 	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(INCLUDES)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(INCLUDES) $(LDFLAGS)
 
+# 编译规则
 $(BUILD_DIR)/%.o: buffer/%.cpp
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@ $(INCLUDES)
@@ -50,6 +53,10 @@ $(BUILD_DIR)/%.o: net/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@ $(INCLUDES)
 
 $(BUILD_DIR)/%.o: protocol/%.cpp
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@ $(INCLUDES)
+
+$(BUILD_DIR)/%.o: storage_manager/%.cpp
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@ $(INCLUDES)
 

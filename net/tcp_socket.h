@@ -1,6 +1,6 @@
 #ifndef SOCKET_H
 #define SOCKET_H
-
+#include"../storage_manager/storage_manager.h"
 #include "socket_ops.h"
 #include <atomic>
 #include <mutex>
@@ -19,9 +19,10 @@ public:
     void set_need_close(bool value) { m_need_close = value; }
     bool need_close() const { return m_need_close; }
     time_t last_heartbeat() const { return m_heartJitter; }
-
+    void OnRead_(uint32_t size);
     SOCKET Accept(sockaddr_in* address);
     bool Send(const uint8_t* Bytes, uint32_t Size);    
+    std::string buildContextForAI();
     void OnConnect();            
     void OnDisconnect();        
     bool Send(CMessageOut &out);
@@ -31,6 +32,7 @@ public:
     void BurstPush();
     inline void BurstEnd() { m_writeMutex.unlock(); }
     string GetRemoteIP();
+    void flushBufferToFile();
     inline uint32_t GetRemotePort() { return ntohs(m_client.sin_port); }
     inline SOCKET GetFd() { return m_fd; }
     inline void SetFd(SOCKET fd)
@@ -92,6 +94,7 @@ public:
 protected:
     void _OnConnect();
     SOCKET m_fd;
+    string s;
     std::atomic<bool> m_need_close = {false};
     std::mutex m_writeMutex;
     std::mutex m_readMutex;
@@ -132,6 +135,7 @@ private:
 
 public:
     void PostEvent(uint32_t events);
+    StorageManager storageManager;
     inline bool HasSendLock()
     {
         return (m_writeLock.load() != 0);

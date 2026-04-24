@@ -1,0 +1,623 @@
+#include"net/tcp_socket.h"
+#include<cstdint>
+#include<cstring>
+#include<iostream>
+#include<sys/types.h>
+#include<sys/socket.h>
+#include <curl/curl.h>
+#include <nlohmann/json.hpp>
+#include <unordered_map>
+using namespace std;
+std::string g_http_test_buffer; 
+Socket::Socket(SOCKET fd, uint32_t sendbuffersize, uint32_t recvbuffersize) : m_fd(fd), m_connected(false), m_deleted(false), m_writeLock(0)
+{
+    readBuffer.Allocate(recvbuffersize);
+    writeBuffer.Allocate(sendbuffersize);
+
+    m_BytesSent = 0;
+    m_BytesRecieved = 0;
+    m_eventCount = 0;
+    isRealRemovedFromSet.store(false);
+    if(m_fd == 0)
+    {
+        m_fd = SocketOps::CreateTCPFileDescriptor();
+        SocketOps::ReuseAddr(m_fd);
+    }
+
+    m_heartJitter = time(NULL);
+    m_readTimer = 0;
+    m_readMsgCount = 0;
+    m_readMsgBool.store(false);
+
+    m_buffer_pos = 0;
+    nMinExpectedSize = 6;
+    masksOffset = 0;
+    payloadSize = 0;
+
+    remaining = 0;
+    compress = 0;
+    opcode = 0;
+    mchecksum = 0;
+}
+
+Socket::~Socket()
+{
+}
+
+bool Socket::Listen(uint32_t port, uint32_t backlog)
+{
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(m_fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+        return false;
+    }
+    if (listen(m_fd, backlog) == -1) {
+        return false;
+    }
+    return true;
+}
+
+void Socket::BurstPush()
+{
+    WriteCallback();
+}
+
+bool Socket::Connect(const char* Address, uint32_t Port)
+{ 
+    struct hostent* ci = gethostbyname(Address);
+    if(ci == 0)
+        return false;
+    m_client.sin_family = ci->h_addrtype;
+    m_client.sin_port = htons((u_short)Port);
+    ::memcpy(&this->m_client.sin_addr.s_addr, ci->h_addr_list[0], ci->h_length);
+    SocketOps::Blocking(m_fd);
+    if(connect(m_fd, (const sockaddr*)&m_client, sizeof(m_client)) == -1)
+        return false;
+    _OnConnect();
+    return true;
+}
+
+SOCKET Socket::Accept(sockaddr_in* address)
+{
+    socklen_t len = sizeof(sockaddr_in);
+    SOCKET client_fd = ::accept(m_fd, (struct sockaddr*)address, &len);
+    if (client_fd == -1)
+    {
+        return -1;
+    }
+    ::memcpy(&m_client, address, sizeof(*address));
+    _OnConnect();
+    return client_fd;
+}
+
+void Socket::_OnConnect()
+{
+    SocketOps::Nonblocking(m_fd);           
+    SocketOps::DisableBuffering(m_fd);       
+    m_connected.store(true);
+    OnConnect();
+}
+
+bool Socket::Send(CMessageOut &out)
+{
+    cout<<"正在尝试发送消息";
+    if (out.getLength() <= 0 || out.getLength() > 10240 - sizeof(MsgHeader))
+        return false;
+
+    if (!IsConnected() || IsDeleted())
+        return false;
+
+    bool rv = true;
+    cout<<"要发消息了哦";
+    try
+    {
+        BurstBegin();
+        uint8_t SendbufferData[10240] = { 0 };
+
+        int uSendSize = out.getLength();
+
+        MsgHeader header = out.getHeader();
+        header.bodyLen = uSendSize;
+
+        ::memcpy(SendbufferData, &header, sizeof(MsgHeader));
+        ::memcpy(SendbufferData + sizeof(MsgHeader),
+            (const uint8_t*)out.getData().body,
+            uSendSize);
+
+        uint32_t totalLen = sizeof(MsgHeader) + uSendSize;
+
+        if (totalLen < 10240)
+        {
+            rv = BurstSend(SendbufferData, totalLen);
+        }
+
+        if (rv)
+            BurstPush();
+    }
+    catch (const std::exception& e)
+    {
+        rv = false;
+    }
+    BurstEnd();
+    return rv;
+}
+std::string getHttpRequestBody(const char* requestBuffer) {
+   
+    const char* split = strstr(requestBuffer, "\r\n\r\n");
+    if (!split) {
+        return ""; 
+    }
+    return std::string(split + 4);
+}
+std::string parseMessage(const std::string& body) {
+    size_t pos = body.find("\"message\":\"");
+    if (pos == string::npos) return "";
+    size_t start = pos + 10;
+    size_t end = body.find("\"", start);
+    return body.substr(start, end - start);
+}
+void Socket::WriteCallback()
+{
+    if (writeBuffer.GetSize() == 0) {
+        return;
+    }
+    char temp[4096];
+    uint32_t len = writeBuffer.Read((uint8_t*)temp, 4096);
+    send(m_fd, temp, len, 0);
+}
+
+bool Socket::BurstSend(const uint8_t* Bytes, uint32_t Size)
+{
+ 
+  return ::send(m_fd, (const char*)Bytes, Size,0);
+  
+}
+
+string Socket::GetRemoteIP()
+{
+    char* ip = (char*)inet_ntoa(m_client.sin_addr);
+    if(ip != NULL)
+        return string(ip);
+    else
+        return string("noip");
+}
+
+void Socket::Disconnect()
+{
+    if(!m_connected.load())
+        return;
+    OnDisconnect();
+    if(!IsDeleted())
+        Delete();
+}
+void Socket::Delete()
+{
+    if(m_deleted.load())
+        return;
+    
+    m_deleted.store(true);
+    m_connected.store(false);
+    
+    // ❌ 不要在这里 close(m_fd)
+    // 让 reactor 统一处理 close
+}
+#include <string>
+#include <cctype>
+
+std::string urlDecode(const std::string& str) {
+    std::string result;
+    result.reserve(str.length());
+    
+    for (size_t i = 0; i < str.length(); i++) {
+        if (str[i] == '+') {
+            result += ' ';
+        }
+        else if (str[i] == '%') {
+            if (i + 2 >= str.length()) {
+                result += str[i];
+                continue;
+            }
+            
+            // 将十六进制字符串转换为字节
+            unsigned char byte = 0;
+            for (int j = 1; j <= 2; j++) {
+                char c = str[i + j];
+                byte <<= 4;
+                if (c >= '0' && c <= '9') {
+                    byte |= (c - '0');
+                } else if (c >= 'A' && c <= 'F') {
+                    byte |= (c - 'A' + 10);
+                } else if (c >= 'a' && c <= 'f') {
+                    byte |= (c - 'a' + 10);
+                } else {
+                    // 无效字符
+                    byte = 0;
+                    break;
+                }
+            }
+            
+            result += static_cast<char>(byte);
+            i += 2;
+        }
+        else {
+            result += str[i];
+        }
+    }
+    
+    return result;
+}
+
+// 辅助函数：转义 JSON 字符串中的特殊字符
+std::string jsonEscape(const std::string& s) {
+    std::string result;
+    for (char c : s) {
+        if (c == '"') result += "\\\"";
+        else if (c == '\\') result += "\\\\";
+        else if (c == '\n') result += "\\n";
+        else if (c == '\r') result += "\\r";
+        else result += c;
+    }
+    return result;
+}
+
+// curl 写回调
+size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* output) {
+    size_t total = size * nmemb;
+    output->append((char*)contents, total);
+    return total;
+}
+
+// 调用 Python AI 服务
+std::string callAIService(const std::string& user_message) {
+    CURL* curl = curl_easy_init();
+    std::string response_data;
+    
+    if (!curl) {
+        return "AI 服务暂时不可用～ 💕";
+    }
+    
+    // Python Flask 服务地址
+    std::string url = "http://127.0.0.1:5000/chat";
+    
+    // 构造请求体（匹配 Python 代码的格式）
+    std::string json_body = R"({
+        "messages": [
+            {"role": "user", "content": ")" + jsonEscape(user_message) + R"("}
+        ],
+        "temperature": 0.95,
+        "max_tokens": 120
+    })";
+    
+    struct curl_slist* headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_body.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_data);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    
+    CURLcode res = curl_easy_perform(curl);
+    
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    
+    if (res != CURLE_OK) {
+        std::cerr << "curl error: " << curl_easy_strerror(res) << std::endl;
+        return "网络有点卡，再试一次？ 💕";
+    }
+    
+    // 解析 JSON 响应
+    try {
+        auto json = nlohmann::json::parse(response_data);
+        // 根据 Python 返回的格式提取 content
+        std::string reply = json["choices"][0]["message"]["content"];
+        return reply;
+    } catch (const std::exception& e) {
+        std::cerr << "JSON 解析错误: " << e.what() << std::endl;
+        return "嗯？再说一遍？ 💕";
+    }
+}
+void Socket::OnRead_(uint32_t size)
+{
+    static std::unordered_map<int, std::string> buffer;
+    
+    char tmp_buf[4096];
+    ssize_t n = recv(m_fd, tmp_buf, sizeof(tmp_buf) - 1, 0);
+    
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return;
+        }
+        perror("recv error");
+        buffer.erase(m_fd);
+        Delete();
+        return;
+    }
+    
+    if (n == 0) {
+        std::cout << "客户端断开连接 fd=" << m_fd << std::endl;
+        buffer.erase(m_fd);
+        Delete();
+        return;
+    }
+    
+    tmp_buf[n] = '\0';
+    buffer[m_fd] += tmp_buf;
+    
+    size_t header_end = buffer[m_fd].find("\r\n\r\n");
+    if (header_end == std::string::npos) {
+        return;
+    }
+    
+    std::string& full_request = buffer[m_fd];
+    std::cout << "\n======== 收到请求 ========\n" << full_request << std::endl;
+    
+    std::string response;
+    
+    // 处理 OPTIONS 预检请求
+    if (full_request.find("OPTIONS") == 0) {
+        response = 
+            "HTTP/1.1 204 No Content\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n"
+            "Access-Control-Allow-Headers: Content-Type\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n\r\n";
+        
+        send(m_fd, response.c_str(), response.size(), 0);
+        buffer.erase(m_fd);
+        Delete();
+        return;
+    }
+    
+    // ========== 处理 POST 请求（对话） ==========
+    if (full_request.find("POST") == 0) {
+        // 提取 body
+        std::string body = getHttpRequestBody(full_request.c_str());
+        std::cout << "原始 body: " << body << std::endl;
+        
+        // 解析 JSON 格式
+        std::string user_message;
+        size_t pos = body.find("\"message\":\"");
+        if (pos != std::string::npos) {
+            pos += 11;
+            size_t end = body.find("\"", pos);
+            if (end != std::string::npos) {
+                user_message = body.substr(pos, end - pos);
+            }
+        }
+        
+        // 兼容 URL 编码格式
+        if (user_message.empty()) {
+            pos = body.find("message=");
+            if (pos != std::string::npos) {
+                user_message = body.substr(pos + 8);
+                user_message = urlDecode(user_message);
+            }
+        }
+        
+        // 去除末尾换行
+        while (!user_message.empty() && (user_message.back() == '\r' || user_message.back() == '\n')) {
+            user_message.pop_back();
+        }
+        
+        std::cout << "\n💬 用户说: " << user_message << std::endl;
+        
+        // ========== 调用 Python AI 服务 ==========
+        std::string ai_reply = callAIService(user_message);
+        std::cout << "🤖 AI 回复: " << ai_reply << std::endl;
+        // ========================================
+        
+        // 转义 JSON 特殊字符
+        std::string escaped_reply = ai_reply;
+        size_t quote_pos = 0;
+        while ((quote_pos = escaped_reply.find("\"", quote_pos)) != std::string::npos) {
+            escaped_reply.replace(quote_pos, 1, "\\\"");
+            quote_pos += 2;
+        }
+        
+        // 构造 JSON 响应
+        std::string json_body = "{\"reply\":\"" + escaped_reply + "\"}";
+        
+        response = 
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: " + std::to_string(json_body.length()) + "\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Connection: close\r\n\r\n" +
+            json_body;
+    } 
+    else {
+        response = 
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html; charset=utf-8\r\n"
+            "Content-Length: 50\r\n"
+            "Connection: close\r\n\r\n"
+            "<html><body>ArcNet Server Running</body></html>";
+    }
+    
+    send(m_fd, response.c_str(), response.size(), 0);
+    std::cout << "📤 已发送响应给前端" << std::endl;
+    
+    buffer.erase(m_fd);
+    Delete();
+}
+void Socket::OnRead(uint32_t size)
+{
+    cout<<"vvrvvrrbrb";
+    char tmp_buf[4096];
+    ssize_t n = recv(m_fd, tmp_buf, sizeof(tmp_buf), 0);
+    if (n <= 0) {
+        if (n == 0) {
+            cout << "客户端主动断开连接" << endl;
+        } else {
+            perror("recv error");
+        }
+        Disconnect();
+        return;
+    }
+
+    GetReadBuffer().Write((uint8_t*)tmp_buf, n);
+
+    m_heartJitter = time(NULL);
+    CircularBuffer& rbuf = GetReadBuffer();
+
+    while (true)
+    {
+        if (rbuf.GetSize() < sizeof(MsgHeader))
+            break;
+            
+        MsgHeader header;
+        rbuf.Peek((uint8_t*)&header, sizeof(MsgHeader));
+        
+        if (header.magic != PROTO_MAGIC)
+        {
+            Disconnect();
+            return;
+        }
+        
+        uint32_t totalLen = sizeof(MsgHeader) + header.bodyLen;
+        if (rbuf.GetSize() < totalLen)
+            break;
+
+        uint8_t* msgData = new uint8_t[totalLen];
+        rbuf.Read(msgData, totalLen);
+        
+        try
+        {
+            CMolMessageIn in((const char*)(msgData + sizeof(MsgHeader)), header.bodyLen);
+            int8_t msgType = in.read8();
+            
+            if (msgType == 50)
+            {
+                delete[] msgData;
+                continue;
+            }
+            
+            std::string chat_content = in.readString();
+            cout << "收到聊天消息：" << chat_content << endl;
+            ++m_readMsgCount;
+        }
+        catch (const std::exception& e)
+        {
+            cout << "消息处理异常：" << e.what() << endl;
+        }
+        
+        delete[] msgData;
+    }
+}
+/*void Socket::OnRead(uint32_t size)
+{
+    cout << "OnRead called" << endl;
+    
+    char tmp_buf[4096];
+    ssize_t n = recv(m_fd, tmp_buf, sizeof(tmp_buf), 0);
+    if (n <= 0) {
+        cout << "recv returned " << n << endl;
+        if (n == 0) {
+            cout << "客户端主动断开连接" << endl;
+        } else {
+            perror("recv error");
+        }
+        Disconnect();
+        return;
+    }
+    
+    // 打印收到的原始数据（十六进制）
+    cout << "收到 " << n << " 字节: ";
+    for (int i = 0; i < n && i < 32; i++) {
+        printf("%02X ", (unsigned char)tmp_buf[i]);
+    }
+    cout << endl;
+    
+    GetReadBuffer().Write((uint8_t*)tmp_buf, n);
+    
+    CircularBuffer& rbuf = GetReadBuffer();
+    cout << "缓冲区大小: " << rbuf.GetSize() << endl;
+
+    while (true)
+    {
+        if (rbuf.GetSize() < sizeof(MsgHeader)) {
+            cout << "缓冲区不足，需要 " << sizeof(MsgHeader) << " 字节，当前 " << rbuf.GetSize() << endl;
+            break;
+        }
+            
+        MsgHeader header;
+        rbuf.Peek((uint8_t*)&header, sizeof(MsgHeader));
+        
+        cout << "读取到的魔数: 0x" << hex << header.magic << dec << endl;
+        cout << "期望魔数: 0x" << hex << PROTO_MAGIC << dec << endl;
+        
+        if (header.magic != PROTO_MAGIC)
+        {
+            cout << "魔数不匹配，断开连接" << endl;
+            Disconnect();
+            return;
+        }
+        
+        uint32_t totalLen = sizeof(MsgHeader) + header.bodyLen;
+        cout << "消息总长度: " << totalLen << endl;
+        
+        if (rbuf.GetSize() < totalLen) {
+            cout << "数据不足，需要 " << totalLen << " 字节，当前 " << rbuf.GetSize() << endl;
+            break;
+        }
+
+        uint8_t* msgData = new uint8_t[totalLen];
+        rbuf.Read(msgData, totalLen);
+        
+        try
+        {
+            CMolMessageIn in((const char*)(msgData + sizeof(MsgHeader)), header.bodyLen);
+            int8_t msgType = in.read8();
+            cout << "消息类型: " << (int)msgType << endl;
+            
+            if (msgType == 50)
+            {
+                delete[] msgData;
+                continue;
+            }
+            
+            std::string chat_content = in.readString();
+            cout << "收到聊天消息：" << chat_content << endl;
+            ++m_readMsgCount;
+        }
+        catch (const std::exception& e)
+        {
+            cout << "消息处理异常：" << e.what() << endl;
+        }
+        
+        delete[] msgData;
+    }
+}*/
+
+void Socket::OnConnect()
+{
+    // 可被子类重写
+}
+
+void Socket::OnDisconnect()
+{
+    // 可被子类重写
+}
+
+void Socket::SetupReadEvent()
+{
+    // epoll事件设置
+}
+
+void Socket::ReadCallback(uint32_t len)
+{
+    OnRead(len);
+}
+
+void Socket::PostEvent(uint32_t events)
+{
+    // 事件分发
+}

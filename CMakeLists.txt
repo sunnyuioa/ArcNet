@@ -1,7 +1,3 @@
-
-### 20. 粘贴 `CMakeLists.txt`
-
-```cmake
 cmake_minimum_required(VERSION 3.10)
 project(ArcNet VERSION 1.0.0)
 
@@ -21,6 +17,19 @@ find_package(Threads REQUIRED)
 # 头文件目录
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
+# 查找 nlohmann/json（如果系统没有安装，可以使用 FetchContent）
+find_package(nlohmann_json QUIET)
+if(NOT nlohmann_json_FOUND)
+    message(STATUS "nlohmann/json not found, will use FetchContent")
+    include(FetchContent)
+    FetchContent_Declare(
+        json
+        URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz
+    )
+    FetchContent_MakeAvailable(json)
+    set(NLOHMANN_JSON_INCLUDE_DIR ${json_SOURCE_DIR}/include)
+endif()
+
 # 源文件列表
 set(BUFFER_SOURCES
     buffer/ring_buffer.cpp
@@ -35,7 +44,8 @@ set(PROTOCOL_SOURCES
     protocol/message_codec.cpp
 )
 
-set(COMMON_SOURCES
+set(STORAGE_SOURCES
+    storage_manager/storage_manager.cpp
 )
 
 # 服务器可执行文件
@@ -44,6 +54,7 @@ add_executable(arcnet_server
     ${BUFFER_SOURCES}
     ${NET_SOURCES}
     ${PROTOCOL_SOURCES}
+    ${STORAGE_SOURCES}
 )
 
 # 客户端可执行文件
@@ -52,6 +63,7 @@ add_executable(arcnet_client
     ${BUFFER_SOURCES}
     ${NET_SOURCES}
     ${PROTOCOL_SOURCES}
+    ${STORAGE_SOURCES}
 )
 
 # 压测工具
@@ -60,12 +72,13 @@ add_executable(benchmark
     ${BUFFER_SOURCES}
     ${NET_SOURCES}
     ${PROTOCOL_SOURCES}
+    ${STORAGE_SOURCES}
 )
 
-# 链接线程库
-target_link_libraries(arcnet_server Threads::Threads)
-target_link_libraries(arcnet_client Threads::Threads)
-target_link_libraries(benchmark Threads::Threads)
+# 链接库
+target_link_libraries(arcnet_server Threads::Threads stdc++fs)
+target_link_libraries(arcnet_client Threads::Threads stdc++fs)
+target_link_libraries(benchmark Threads::Threads stdc++fs)
 
 # 设置编译选项
 target_compile_options(arcnet_server PRIVATE -Wall -Wextra)
