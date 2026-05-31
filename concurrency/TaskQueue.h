@@ -17,8 +17,7 @@ public:
     {
         std::lock_guard<std::mutex> lock(mutex_);
         tasks_.push(std::move(task));
-    }
-    
+    }   
     Task pop()
     {
         std::lock_guard<std::mutex> lock(mutex_);

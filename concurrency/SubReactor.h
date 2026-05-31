@@ -1,6 +1,5 @@
 #ifndef SUB_REACTOR_H
 #define SUB_REACTOR_H
-
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <unistd.h>
@@ -12,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <iostream>
+#include"../mysql/DBWorker.h"
 #include "TaskQueue.h"
 #include "../net/socket_manager.h"
 #include "../net/workthread.h"
@@ -19,35 +19,36 @@
 class SubReactor {
 public:
     SubReactor(int cpu_id) : cpu_id_(cpu_id) {
+        cpu_mysql_ = new DBWorker("10.254.153.228", "root", "Lianqi@123", "user");
         epfd_ = epoll_create1(0);
         if (epfd_ == -1) {
             perror("epoll_create1 failed");
         }
     }
-    
     void bind_cpu(int cpu_id) {
         cpu_set_t cpuset;
         CPU_ZERO(&cpuset);
         CPU_SET(cpu_id, &cpuset);
         pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
     }
-    
     void start() {
         thread_.start();
         thread_.post([this]() {
             bind_cpu(cpu_id_);
             run_loop();
         });
-    }
-    
+    }  
     void foreach_socket(std::function<void(Socket*)> func) const {
         socket_mgr_.foreach_socket(func);
     }
-    
   void add_client(int client_fd) {
     // ... 设置非阻塞等 ...
-    
-    Socket* s = new Socket(client_fd, 1024 * 16, 1024 * 16);
+    if (!cpu_mysql_) {
+    std::cerr << "DBWorker not initialized, refuse new client" << std::endl;
+    close(client_fd);
+    return;
+}
+    Socket* s = new Socket(client_fd, 1024 * 16, 1024 * 16,*cpu_mysql_);
     socket_mgr_.add(client_fd, s);
     
     epoll_event ev;
@@ -102,7 +103,7 @@ private:
             }
             
             if (evs[i].events & EPOLLIN) {
-                s->OnRead_(4096);
+                s->onreads();
                 // OnRead_ 可能会调用 Delete()，下次循环会清理
             }
             
@@ -118,6 +119,7 @@ private:
     int cpu_id_;
     WorkerThread thread_;
     SocketManager socket_mgr_;
+    DBWorker* cpu_mysql_;
 };
 
 #endif

@@ -252,26 +252,26 @@
         }
 
         /* 输入栏 */
-        .input-area {
-            padding: 16px 18px;
-            background: rgba0, 0, 0, 0.3);
-            backdrop-filter: blur(20px);
-            border-top: 1px solid rgba(255, 200, 230, 0.3);
-            display: flex;
-            gap: 12px;
-            align-items: center;
-        }
-        #userInput {
-            flex: 1;
-            background: rgba(25, 15, 40, 0.8);
-            border: 1px solid #ff99cc66;
-            border-radius: 32px;
-            padding: 14px 18px;
-            color: #ffeef4;
-            font-size: 0.9rem;
-            outline: none;
-            transition: 0.2s;
-        }
+     .input-area {
+    padding: 16px 18px;
+    background: rgba(0, 0, 0, 0.3); /* 这里修复：加了 ( */
+    backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(255, 200, 230, 0.3);
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+#userInput {                /* 这里修复：} 换成 { */
+    flex: 1;
+    background: rgba(25, 15, 40, 0.8);
+    border: 1px solid #ff99cc66;
+    border-radius: 32px;
+    padding: 14px 18px;
+    color: #ffeef4;
+    font-size: 0.9rem;
+    outline: none;
+    transition: 0.2s;
+}
         #userInput:focus {
             border-color: #ff66aa;
             box-shadow: 0 0 10px #ff88bb55;
@@ -438,7 +438,7 @@
 
 <script>
     // ========== 你的服务器地址已填好 ==========
-    const SERVER_URL = "http://10.237.155.46:8888/chat";
+    const SERVER_URL = "http://10.254.153.228:8001/chat";
 
     const DEFAULT_CHARACTER = "你是用户的AI男友，温柔又带点霸道，会叫我宝宝，说话带颜文字，超级宠溺。";
 

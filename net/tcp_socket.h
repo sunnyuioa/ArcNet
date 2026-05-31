@@ -3,6 +3,7 @@
 #include"../storage_manager/storage_manager.h"
 #include "socket_ops.h"
 #include <atomic>
+#include"../mysql/DBWorker.h"
 #include <mutex>
 #include <ctime>
 #include <map>
@@ -12,19 +13,22 @@
 class Socket
 {
 public:
-    Socket(SOCKET fd, uint32_t sendbuffersize, uint32_t recvbuffersize);
+    Socket(SOCKET fd, uint32_t sendbuffersize, uint32_t recvbuffersize,DBWorker& m_mysqll);
     virtual ~Socket();
     bool Connect(const char* Address, uint32_t Port);
     void Disconnect();
+    bool login(DBWorker & d,std::map<int, UserInfo>  &s);
     void set_need_close(bool value) { m_need_close = value; }
     bool need_close() const { return m_need_close; }
     time_t last_heartbeat() const { return m_heartJitter; }
-    void OnRead_(uint32_t size);
+    void OnRead_(uint32_t size,char * tmp_buf);
+    void OnRead(uint32_t size,char * tmp_buf);
     SOCKET Accept(sockaddr_in* address);
     bool Send(const uint8_t* Bytes, uint32_t Size);    
     std::string buildContextForAI();
+    bool regiser(DBWorker & d,std::map<int, UserInfo>  &s);
     void OnConnect();            
-    void OnDisconnect();        
+    void OnDisconnect();    
     bool Send(CMessageOut &out);
     bool Listen(uint32_t port, uint32_t backlog = 10);
     inline void BurstBegin() { m_writeMutex.lock(); }
@@ -49,7 +53,7 @@ public:
     void SetupReadEvent();
     void ReadCallback(uint32_t len);
     void WriteCallback();
-
+    void onreads();
     inline void Clear(void)
     {
         m_connected.store(false);
@@ -132,7 +136,8 @@ public:
 private:
     std::atomic<int> m_writeLock;
     sockaddr_in m_client;
-
+    //DBWorker *m_mysql;
+    DBWorker *m_mysql;
 public:
     void PostEvent(uint32_t events);
     StorageManager storageManager;
@@ -140,7 +145,6 @@ public:
     {
         return (m_writeLock.load() != 0);
     }
-    void OnRead(uint32_t size);
 
 public:
     void PollTraffic(unsigned long* sent, unsigned long* recieved)
@@ -173,5 +177,8 @@ T* ConnectTCPSocket(const char* hostname, u_short port)
     }
     return s;
 }
-
+struct UserInfo {
+    std::string account;  
+    std::string username; 
+};
 #endif
