@@ -12,7 +12,6 @@ DBWorker::DBWorker(const std::string& host, const std::string& user,
         throw std::runtime_error("mysql_init failed");
     }
 
-    // 设置自动重连（可选）
     bool reconnect = 1;
     mysql_options(conn_, MYSQL_OPT_RECONNECT, &reconnect);
 
@@ -23,21 +22,22 @@ DBWorker::DBWorker(const std::string& host, const std::string& user,
         throw std::runtime_error(errMsg);
     }
 
-    // 设置字符集为 UTF-8
     mysql_set_character_set(conn_, "utf8mb4");
 }
+
 DBWorker::~DBWorker() {
     if (conn_) {
         mysql_close(conn_);
         conn_ = nullptr;
     }
 }
+
 bool DBWorker::isConnected() {
     if (!conn_) return false;
     return mysql_ping(conn_) == 0;
 }
 
-// 通用预编译查询执行器
+// 通用预编译查询执行器（只有一个）
 bool DBWorker::executePreparedQuery(const std::string& sql,
                                      std::vector<MYSQL_BIND>& params,
                                     std::function<bool(MYSQL_STMT*)> processResult) {
@@ -58,7 +58,6 @@ bool DBWorker::executePreparedQuery(const std::string& sql,
         return false;
     }
 
-    // 绑定参数
     if (!params.empty()) {
         if (mysql_stmt_bind_param(stmt, params.data())) {
             std::cerr << "mysql_stmt_bind_param failed: " << mysql_stmt_error(stmt) << std::endl;
@@ -67,24 +66,19 @@ bool DBWorker::executePreparedQuery(const std::string& sql,
         }
     }
 
-    // 执行
     if (mysql_stmt_execute(stmt)) {
         std::cerr << "mysql_stmt_execute failed: " << mysql_stmt_error(stmt) << std::endl;
         mysql_stmt_close(stmt);
         return false;
     }
 
-    // ========== 改动：增加这一整块 ==========
-    // 存储结果集，对于 SELECT 语句必须调用，否则后续 fetch 会失败；
-    // 对于 INSERT/UPDATE 等不产生结果集的语句，调用也安全（返回0且字段数为0）
+    // 必须存储结果集，否则 SELECT 无法 fetch
     if (mysql_stmt_store_result(stmt) != 0) {
         std::cerr << "mysql_stmt_store_result failed: " << mysql_stmt_error(stmt) << std::endl;
         mysql_stmt_close(stmt);
         return false;
     }
-    // ========== 改动结束 ==========
 
-    // 处理结果（如果需要）
     bool result = true;
     if (processResult) {
         result = processResult(stmt);
@@ -93,60 +87,75 @@ bool DBWorker::executePreparedQuery(const std::string& sql,
     mysql_stmt_close(stmt);
     return result;
 }
-// 登录验证实现
-bool DBWorker::executePreparedQuery(const std::string& sql,
-                                     std::vector<MYSQL_BIND>& params,
-                                    std::function<bool(MYSQL_STMT*)> processResult) {
-    if (!isConnected()) {
-        std::cerr << "Database connection lost" << std::endl;
-        return false;
-    }
 
-    MYSQL_STMT* stmt = mysql_stmt_init(conn_);
-    if (!stmt) {
-        std::cerr << "mysql_stmt_init failed" << std::endl;
-        return false;
-    }
+// 登录验证
+bool DBWorker::verifyLogin(const std::string& username, const std::string& password,
+                           int* outUserId) {
+    const std::string sql = "SELECT id, password_hash FROM users WHERE username = ?";
 
-    if (mysql_stmt_prepare(stmt, sql.c_str(), sql.length())) {
-        std::cerr << "mysql_stmt_prepare failed: " << mysql_stmt_error(stmt) << std::endl;
-        mysql_stmt_close(stmt);
-        return false;
-    }
+    MYSQL_BIND bind[1];
+    memset(bind, 0, sizeof(bind));
+    bind[0].buffer_type = MYSQL_TYPE_STRING;
+    bind[0].buffer = (void*)username.c_str();
+    bind[0].buffer_length = username.length();
 
-    // 绑定参数
-    if (!params.empty()) {
-        if (mysql_stmt_bind_param(stmt, params.data())) {
-            std::cerr << "mysql_stmt_bind_param failed: " << mysql_stmt_error(stmt) << std::endl;
-            mysql_stmt_close(stmt);
+    std::vector<MYSQL_BIND> params(bind, bind + 1);
+
+    int userId = -1;
+    std::string storedHash;
+    bool found = false;
+
+    auto process = [&](MYSQL_STMT* stmt) -> bool {
+        MYSQL_BIND resultBind[2];
+        memset(resultBind, 0, sizeof(resultBind));
+
+        unsigned long idLen;
+        resultBind[0].buffer_type = MYSQL_TYPE_LONG;
+        resultBind[0].buffer = &userId;
+        resultBind[0].buffer_length = sizeof(userId);
+        resultBind[0].length = &idLen;
+        resultBind[0].is_null = nullptr;
+
+        char hashBuffer[256];
+        unsigned long hashLen;
+        resultBind[1].buffer_type = MYSQL_TYPE_STRING;
+        resultBind[1].buffer = hashBuffer;
+        resultBind[1].buffer_length = sizeof(hashBuffer);
+        resultBind[1].length = &hashLen;
+        resultBind[1].is_null = nullptr;
+
+        if (mysql_stmt_bind_result(stmt, resultBind)) {
+            std::cerr << "mysql_stmt_bind_result failed: " << mysql_stmt_error(stmt) << std::endl;
             return false;
         }
-    }
 
-    // 执行
-    if (mysql_stmt_execute(stmt)) {
-        std::cerr << "mysql_stmt_execute failed: " << mysql_stmt_error(stmt) << std::endl;
-        mysql_stmt_close(stmt);
+        int ret = mysql_stmt_fetch(stmt);
+        if (ret == 0) {
+            found = true;
+            storedHash.assign(hashBuffer, hashLen);
+        } else if (ret != MYSQL_NO_DATA) {
+            std::cerr << "mysql_stmt_fetch error: " << mysql_stmt_error(stmt) << std::endl;
+        }
+        return true;
+    };
+
+    if (!executePreparedQuery(sql, params, process)) {
         return false;
     }
 
-    // ========== 改动 1：必须存储结果集（修复查询无结果的问题）==========
-    if (mysql_stmt_store_result(stmt) != 0) {
-        std::cerr << "mysql_stmt_store_result failed: " << mysql_stmt_error(stmt) << std::endl;
-        mysql_stmt_close(stmt);
+    if (!found) {
         return false;
     }
 
-    // 处理结果（如果需要）
-    bool result = true;
-    if (processResult) {
-        result = processResult(stmt);
+    // 当前明文比较，后续替换为 bcrypt 等
+    if (password == storedHash) {
+        if (outUserId) *outUserId = userId;
+        return true;
     }
-
-    mysql_stmt_close(stmt);
-    return result;
+    return false;
 }
-// 注册新用户示例（使用预编译，密码应存哈希）
+
+// 注册新用户
 bool DBWorker::registerUser(const std::string& username, const std::string& passwordHash) {
     const std::string sql = "INSERT INTO users (username, password_hash) VALUES (?, ?)";
     MYSQL_BIND bind[2];
@@ -162,7 +171,6 @@ bool DBWorker::registerUser(const std::string& username, const std::string& pass
 
     std::vector<MYSQL_BIND> params(bind, bind + 2);
 
-    // 执行插入，不需要处理结果集
     auto processEmpty = [](MYSQL_STMT*) -> bool { return true; };
     return executePreparedQuery(sql, params, processEmpty);
 }

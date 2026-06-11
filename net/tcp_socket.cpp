@@ -7,9 +7,13 @@
 #include<iostream>
 #include<sys/types.h>
 #include<sys/socket.h>
+#include"../Room/RoomDef.h"
 #include <unordered_map>
 using namespace std;
 #include <sstream>
+#include"../Room/RoomManager.h"
+#include"../Room/Room.h"
+#include "../concurrency/SubReactor.h"
 #include <nlohmann/json.hpp>
 using json = nlohmann::json;
 // 将 \u4f60 这种格式转换成中文
@@ -919,26 +923,109 @@ void Socket::OnRead(uint32_t size,char * tmp_buf)
 }*/
 void Socket::onreads()
 {
-char tmp_buf[1024];
-ssize_t n = recv(m_fd, tmp_buf, sizeof(tmp_buf) - 1, 0);
-if (n <= 0) {
-    return;
-}
-switch (tmp_buf[0]) {
-    case 0x01:
-        OnRead_(n, tmp_buf);
+    char tmp_buf[1024];
+    ssize_t n = recv(m_fd, tmp_buf, sizeof(tmp_buf) - 1, 0);
+    if (n <= 0) {
+        return;
+    }
+    switch (tmp_buf[0]) {
+    case '1': {
+        std::string userMsg(tmp_buf + 1, n - 1);
+        std::cout << "👤 用户说: " << userMsg << std::endl;
+        // 1. 存入内存历史
+        m_chatHistory.emplace_back("user", userMsg);
+        // 持久化到文件
+        storageManager.appendMessage("user", userMsg);
+
+        // 2. 构建 AI 上下文（系统人设 + 最近 30 轮历史）
+        json messages = json::array();
+        messages.push_back({
+            {"role", "system"},
+            {"content", "你是一个对人类友好的ai"}
+        });
+
+        size_t start = (m_chatHistory.size() > 30) ? (m_chatHistory.size() - 30) : 0;
+        for (size_t i = start; i < m_chatHistory.size(); ++i) {
+            messages.push_back({
+                {"role", m_chatHistory[i].first},
+                {"content", m_chatHistory[i].second}
+            });
+        }
+
+        json request;
+        request["messages"] = messages;
+        request["temperature"] = 0.95;
+        request["max_tokens"] = 120;
+        std::string jsonStr = request.dump();
+
+        // 3. 调用本地 AI 服务
+        std::string aiReply = "AI 服务暂时不可用 💕";
+        int aiSock = socket(AF_INET, SOCK_STREAM, 0);
+        if (aiSock >= 0) {
+            struct sockaddr_in aiAddr;
+            aiAddr.sin_family = AF_INET;
+            aiAddr.sin_port = htons(8001);
+            aiAddr.sin_addr.s_addr = inet_addr("10.254.153.228");
+
+            if (connect(aiSock, (struct sockaddr*)&aiAddr, sizeof(aiAddr)) == 0) {
+                std::string httpReq =
+                    "POST /v1/chat/completions HTTP/1.1\r\n"
+                    "Host: 10.254.153.228:8001\r\n"
+                    "Content-Type: application/json\r\n"
+                    "Content-Length: " + std::to_string(jsonStr.length()) + "\r\n"
+                    "Connection: close\r\n"
+                    "\r\n" + jsonStr;
+
+                send(aiSock, httpReq.c_str(), httpReq.size(), 0);
+
+                std::string resp;
+                char buf[4096];
+                ssize_t rn;
+                while ((rn = recv(aiSock, buf, sizeof(buf)-1, 0)) > 0) {
+                    buf[rn] = '\0';
+                    resp += buf;
+                }
+
+                size_t bodyStart = resp.find("\r\n\r\n");
+                if (bodyStart != std::string::npos) {
+                    std::string jsonBody = resp.substr(bodyStart + 4);
+                    size_t cp = jsonBody.find("\"content\":\"");
+                    if (cp != std::string::npos) {
+                        cp += 11;
+                        size_t end = jsonBody.find("\"", cp);
+                        if (end != std::string::npos) {
+                            aiReply = jsonBody.substr(cp, end - cp);
+                            // 反转义
+                            size_t esc;
+                            while ((esc = aiReply.find("\\n")) != std::string::npos)
+                                aiReply.replace(esc, 2, "\n");
+                            while ((esc = aiReply.find("\\\"")) != std::string::npos)
+                                aiReply.replace(esc, 2, "\"");
+                        }
+                    }
+                }
+            }
+            close(aiSock);
+        }
+
+        std::cout << "🤖 AI 回复: " << aiReply << std::endl;
+
+        // 4. 存入内存历史 + 持久化
+        m_chatHistory.emplace_back("assistant", aiReply);
+        storageManager.appendMessage("assistant", aiReply);
+
+        // 5. 发给客户端
+        send(m_fd, aiReply.c_str(), aiReply.size(), 0);
         break;
-    case 0x02:
+    }
+    case '2':
         OnRead(n, tmp_buf);
         break;
-    case 0x03: {
-        // 从第二个字节开始取数据（跳过命令号0x03）
+    case '3': {
+        // 登录
         std::string str(tmp_buf + 1, n - 1);
-
-        // 查找分隔符
         size_t split_pos = str.find('/');
         UserInfo info;
-
         if (split_pos != std::string::npos) {
             info.account = str.substr(0, split_pos);
             info.username = str.substr(split_pos + 1);
@@ -946,20 +1033,16 @@ switch (tmp_buf[0]) {
             std::cout << "未找到分隔符 /" << std::endl;
             break;
         }
-        // 存入map并传给login
         std::map<int, UserInfo> user_map;
         user_map[1] = info;
         login(*m_mysql, user_map);
-
         break;
     }
-     case 0x04:{
+    case '4': {
+        // 注册
         std::string str(tmp_buf + 1, n - 1);
-
-        // 查找分隔符
         size_t split_pos = str.find('/');
         UserInfo info;
-
         if (split_pos != std::string::npos) {
             info.account = str.substr(0, split_pos);
             info.username = str.substr(split_pos + 1);
@@ -967,11 +1050,95 @@ switch (tmp_buf[0]) {
             std::cout << "未找到分隔符 /" << std::endl;
             break;
         }
-        // 存入map并传给login
         std::map<int, UserInfo> user_map;
         user_map[1] = info;
-        regiser(*m_mysql,user_map);
+        regiser(*m_mysql, user_map);
+        break;
     }
+    case '5': {
+        std::cout << "[onreads] 收到匹配请求, fd=" << m_fd << " n=" << n << " username=" << m_username << std::endl;
+        if (n == 1) {
+            // 仅一个字节 '5'：发起匹配请求
+            MatchTask join;
+            join.type     = MatchMsgType::JOIN_QUEUE;
+            join.fromFd   = m_fd;
+            join.userName = m_username;
+            MatchManager::instance().postMatchTask(join);
+        } else {
+            // '5' + 内容：真人聊天消息转发
+            std::string msgContent(tmp_buf + 1, n - 1);
+            if (m_chatMode == 2 && m_peerFd != -1) {
+                MatchTask relay;
+                relay.type     = MatchMsgType::PEER_MSG;
+                relay.fromFd   = m_fd;
+                relay.targetFd = m_peerFd;
+                relay.content  = msgContent;
+                SubReactor* peerReactor = MatchManager::instance().findReactorByFd(m_peerFd);
+                if (peerReactor) {
+                    peerReactor->postMatchTask(relay);
+                }
+            }
+        }
+        break;
+    }
+    case 'Y': {
+        // 同意匹配
+        MatchTask accept;
+        accept.type     = MatchMsgType::USER_ACCEPT;
+        accept.fromFd   = m_fd;
+        accept.userName = m_username;
+        MatchManager::instance().postMatchTask(accept);
+        break;
+    }
+    case 'R': {
+    if (n < 3) break;
+    char subCmd = tmp_buf[1];
+    std::string payload(tmp_buf + 2, n - 2);
+
+    // 调试日志：打印子命令和原始数据
+    std::cerr << "[onreads] R command, sub=" << subCmd
+              << " payload_len=" << payload.length()
+              << " data=[" << payload << "]" << std::endl;
+
+    RoomTask task;
+    task.fromFd   = m_fd;
+    task.userName = m_username;
+
+    switch (subCmd) {
+   case 'C': {
+    task.type = RoomMsgType::CREATE;
+    task.content = payload;   // 原样传递完整 JSON，由 RoomManager 统一解析
+    RoomManager::instance().postRoomTask(task);
+    break;
+   }
+    case 'J': {   // 加入房间
+        task.type = RoomMsgType::JOIN;
+        try {
+            task.roomId = std::stoi(payload);
+        } catch (...) {
+            std::cerr << "[onreads] JOIN invalid roomId: " << payload << std::endl;
+            break;
+        }
+        RoomManager::instance().postRoomTask(task);
+        break;
+    }
+    case 'S': {   // 房间聊天
+        task.type    = RoomMsgType::CHAT;
+        task.content = payload;
+        RoomManager::instance().postRoomTask(task);
+        break;
+    }
+    case 'L': {   // 请求房间列表
+        task.type = RoomMsgType::LIST;
+        RoomManager::instance().postRoomTask(task);
+        break;
+    }
+    default:
+        std::cerr << "[onreads] Unknown room subCmd: " << subCmd << std::endl;
+        break;
+    }
+    break;
+}
     default:
         break;
     }
@@ -991,7 +1158,7 @@ void Socket::SetupReadEvent()
 {
     // epoll事件设置
 }
-bool Socket::login(DBWorker & d,std::map<int, UserInfo>  &s)
+/*bool Socket::login(DBWorker & d,std::map<int, UserInfo>  &s)
 {
    auto& u = s[1];
    string acc  = u.username;
@@ -1018,6 +1185,48 @@ bool Socket::login(DBWorker & d,std::map<int, UserInfo>  &s)
  cout<<"注册失败!";
   return 0;
 }
+}*/
+bool Socket::login(DBWorker & d, std::map<int, UserInfo> &s)
+{
+    auto& u = s[1];
+    std::string account  = u.account;   // 账号名
+    std::string password = u.username;  // 密码
+    if (!d.isConnected()) {
+        std::cout << "MySQL连接已经断开~" << std::endl;
+        send(m_fd, "LOGIN_FAIL\n", 11, 0);
+        return false;
+    }
+    int userId = -1;
+    bool ok = d.verifyLogin(account, password, &userId);
+    if (ok) {
+        m_username = account;   // ✅ 存储用户名，匹配时使用
+        storageManager.setUserId(userId);
+        auto history = storageManager.loadHistory();
+        m_chatHistory.clear();
+        for (const auto& msg : history) {
+            m_chatHistory.emplace_back(msg.role, msg.content);
+        }
+        send(m_fd, "LOGIN_OK\n", 9, 0);
+    } else {
+        send(m_fd, "LOGIN_FAIL\n", 11, 0);
+    }
+    return ok;
+}
+
+bool Socket::regiser(DBWorker & d, std::map<int, UserInfo> &s)
+{
+    auto& u = s[1];
+    std::string account  = u.account;   // 账号名
+    std::string password = u.username;  // 密码
+
+    bool ret = d.registerUser(account, password);
+    if (ret) {
+        send(m_fd, "REG_OK\n", 7, 0);
+    } else {
+        std::cout << "注册失败!" << std::endl;
+        send(m_fd, "REG_FAIL\n", 9, 0);
+    }
+    return ret;
 }
 void Socket::ReadCallback(uint32_t len)
 {

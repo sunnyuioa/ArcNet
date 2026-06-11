@@ -4,7 +4,7 @@
 #include "net/tcp_socket.h"
 
 int main() {
-    signal(SIGPIPE, SIG_IGN);
+   /* signal(SIGPIPE, SIG_IGN);
     
     std::cout << "正在连接服务器 127.0.0.1:8888 ..." << std::endl;
     
@@ -45,7 +45,7 @@ int main() {
     
     s->Disconnect();
     delete s;
-    std::cout << "已断开连接" << std::endl;
+    std::cout << "已断开连接" << std::end*/
     
     return 0;
 }

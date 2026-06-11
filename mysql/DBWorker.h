@@ -4,7 +4,8 @@
 #include <string>
 #include <memory>
 #include <functional>
-
+#include <vector>
+#include <functional>
 class DBWorker {
 public:
     // 构造函数：立即连接数据库

@@ -8,36 +8,6 @@
 #include <atomic>
 #include <chrono>
 #include"../concurrency/TaskQueue.h"
-/*class TaskQueue
-{
-public:
-    using Task = std::function<void()>; 
-
-    void push(Task task)
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        tasks_.push(std::move(task));
-    }
-    
-    Task pop()
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (tasks_.empty()) return Task();
-        Task task = std::move(tasks_.front());
-        tasks_.pop();
-        return task;
-    }
-    
-    TaskQueue() = default;
-    ~TaskQueue() = default;
-    TaskQueue(const TaskQueue&) = delete;
-    TaskQueue& operator=(const TaskQueue&) = delete;
-    
-private:
-    std::queue<Task> tasks_;
-    std::mutex mutex_;
-};
-*/
 class WorkerThread {
 private:
     std::thread t;

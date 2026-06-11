@@ -6,19 +6,40 @@
 
 using json = nlohmann::json;
 
+// ---------- 模式切换 ----------
+void StorageManager::setUserId(int user_id) {
+    setUserMode(user_id);
+}
+
+void StorageManager::setUserMode(int user_id) {
+    id_ = user_id;
+    filePrefix_ = "user_";
+}
+
+void StorageManager::setRoomMode(int room_id) {
+    id_ = room_id;
+    filePrefix_ = "room_";
+}
+
+// 通用文件路径生成
 std::string StorageManager::getFilePath() const {
-    return "user_" + std::to_string(user_id_) + ".json";
+    return filePrefix_ + std::to_string(id_) + ".json";
 }
 
+// 兼容旧名：检查文件是否存在
 bool StorageManager::userExists() const {
-    std::string filename = getFilePath();
-    return std::experimental::filesystem::exists(filename);
+    return std::experimental::filesystem::exists(getFilePath());
 }
-// 从缓冲区构建发给 AI 的 JSON 数据（包含人设）
 
+bool StorageManager::fileExists() const {
+    return std::experimental::filesystem::exists(getFilePath());
+}
+
+// ---------- 历史消息保存/加载 ----------
 void StorageManager::saveHistory(const std::vector<Message>& history) {
     json j;
-    j["user_id"] = user_id_;
+    j["type"] = filePrefix_ == "user_" ? "user" : "room";
+    j["id"] = id_;
     j["last_update"] = time(nullptr);
     j["total_messages"] = history.size();
     
@@ -35,16 +56,15 @@ void StorageManager::saveHistory(const std::vector<Message>& history) {
     if (file.is_open()) {
         file << j.dump(4);
         file.close();
-        std::cout << "✅ 保存用户 " << user_id_ << " 历史，共 " << history.size() << " 条" << std::endl;
+        std::cout << "✅ 保存 " << filePrefix_ << id_ << " 历史，共 " << history.size() << " 条" << std::endl;
     } else {
-        std::cerr << "❌ 无法保存用户 " << user_id_ << " 历史" << std::endl;
+        std::cerr << "❌ 无法保存 " << filePrefix_ << id_ << " 历史" << std::endl;
     }
 }
 
 std::vector<Message> StorageManager::loadHistory() {
     std::string filename = getFilePath();
     std::ifstream file(filename);
-    
     if (!file.is_open()) {
         return {};
     }
@@ -64,17 +84,15 @@ std::vector<Message> StorageManager::loadHistory() {
         }
     }
     
-    std::cout << "📂 加载用户 " << user_id_ << " 历史，共 " << history.size() << " 条" << std::endl;
+    std::cout << "📂 加载 " << filePrefix_ << id_ << " 历史，共 " << history.size() << " 条" << std::endl;
     return history;
 }
 
 void StorageManager::appendMessage(const std::string& role, const std::string& content) {
-    // 如果用户不存在，先创建
-    if (!userExists()) {
+    if (!fileExists()) {
         createUserFile();
     }
     
-    // 然后正常追加消息
     auto history = loadHistory();
     Message msg(role, content, time(nullptr));
     history.push_back(msg);
@@ -86,81 +104,81 @@ void StorageManager::appendMessage(const std::string& role, const std::string& c
     }
     saveHistory(history);
     
-    // 更新统计
-    updateStatsAfterAppend(role, content);
+    // 更新统计（仅用户模式需要统计，房间模式可跳过）
+    if (filePrefix_ == "user_") {
+        updateStatsAfterAppend(role, content);
+    }
 }
 
+// ---------- 文件创建 ----------
 bool StorageManager::createUserFile() {
     std::string filename = getFilePath();
-    
     if (std::experimental::filesystem::exists(filename)) {
-        std::cout << "⚠️ 用户文件已存在: " << filename << std::endl;
+        std::cout << "⚠️ 文件已存在: " << filename << std::endl;
         return false;
     }
     
     json j;
-    j["user_id"] = user_id_;
+    j["type"] = filePrefix_ == "user_" ? "user" : "room";
+    j["id"] = id_;
     j["messages"] = json::array();
     j["total_messages"] = 0;
     j["last_update"] = time(nullptr);
-    j["character"] = "";
     
-    // 初始化统计字段
-    j["stats"] = json::object();
-    j["stats"]["user_messages"] = 0;
-    j["stats"]["ai_messages"] = 0;
-    j["stats"]["total_bytes"] = 0;
-    j["stats"]["character_bytes"] = 0;
+    if (filePrefix_ == "user_") {
+        j["character"] = "";
+        j["stats"] = json::object();
+        j["stats"]["user_messages"] = 0;
+        j["stats"]["ai_messages"] = 0;
+        j["stats"]["total_bytes"] = 0;
+        j["stats"]["character_bytes"] = 0;
+    }
     
     std::ofstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "❌ 创建用户文件失败: " << filename << std::endl;
+        std::cerr << "❌ 创建文件失败: " << filename << std::endl;
         return false;
     }
     
     file << j.dump(4);
     file.close();
-    
-    std::cout << "✨ 创建新用户文件成功: " << filename << std::endl;
+    std::cout << "✨ 创建新文件成功: " << filename << std::endl;
     return true;
 }
 
 void StorageManager::deleteHistory() {
     std::string filename = getFilePath();
     if (std::experimental::filesystem::remove(filename)) {
-        std::cout << "🗑️ 删除用户 " << user_id_ << " 的历史文件" << std::endl;
+        std::cout << "🗑️ 删除文件 " << filename << std::endl;
     }
 }
 
+// ---------- 查询功能 ----------
 std::vector<Message> StorageManager::getRecent(int count) {
     auto history = loadHistory();
-    
     if (history.size() <= count) {
         return history;
     }
-    
     return std::vector<Message>(history.end() - count, history.end());
 }
 
 std::vector<Message> StorageManager::searchHistory(const std::string& keyword) {
     auto history = loadHistory();
     std::vector<Message> results;
-    
     for (const auto& msg : history) {
         if (msg.content.find(keyword) != std::string::npos) {
             results.push_back(msg);
         }
     }
-    
-    std::cout << "🔍 用户 " << user_id_ << " 搜索 '" << keyword << "'，找到 " << results.size() << " 条" << std::endl;
+    std::cout << "🔍 搜索 '" << keyword << "'，找到 " << results.size() << " 条" << std::endl;
     return results;
 }
 
 int StorageManager::getMessageCount() {
-    auto history = loadHistory();
-    return history.size();
+    return loadHistory().size();
 }
 
+// ---------- 人设（仅用户模式有效） ----------
 void StorageManager::saveCharacter(const std::string& character) {
     std::string filename = getFilePath();
     std::ifstream file(filename);
@@ -170,68 +188,61 @@ void StorageManager::saveCharacter(const std::string& character) {
         file >> j;
         file.close();
     } else {
-        // 文件不存在，创建基础结构
-        j["user_id"] = user_id_;
+        j["type"] = filePrefix_ == "user_" ? "user" : "room";
+        j["id"] = id_;
         j["messages"] = json::array();
         j["total_messages"] = 0;
         j["last_update"] = time(nullptr);
-        
-        // 初始化统计字段
-        j["stats"] = json::object();
-        j["stats"]["user_messages"] = 0;
-        j["stats"]["ai_messages"] = 0;
-        j["stats"]["total_bytes"] = 0;
-        j["stats"]["character_bytes"] = 0;
+        if (filePrefix_ == "user_") {
+            j["stats"] = json::object();
+            j["stats"]["user_messages"] = 0;
+            j["stats"]["ai_messages"] = 0;
+            j["stats"]["total_bytes"] = 0;
+            j["stats"]["character_bytes"] = 0;
+        }
     }
     
-    // 更新人设
     j["character"] = character;
     j["last_update"] = time(nullptr);
     
     // 更新人设字数统计
     int char_bytes = character.length();
-    j["stats"]["character_bytes"] = char_bytes;
-    
-    // 重新计算总字节数 = 消息总字节 + 人设字节
-    int msg_bytes = j["stats"].value("total_bytes", 0);
-    j["stats"]["total_bytes"] = msg_bytes + char_bytes;
+    if (filePrefix_ == "user_") {
+        j["stats"]["character_bytes"] = char_bytes;
+        int msg_bytes = j["stats"].value("total_bytes", 0);
+        j["stats"]["total_bytes"] = msg_bytes + char_bytes;
+    }
     
     std::ofstream outFile(filename);
     if (outFile.is_open()) {
         outFile << j.dump(4);
         outFile.close();
-        std::cout << "💾 保存用户 " << user_id_ << " 的人设: " << character << std::endl;
+        std::cout << "💾 保存 " << filePrefix_ << id_ << " 的人设: " << character << std::endl;
     }
 }
 
 std::string StorageManager::loadCharacter() {
     std::string filename = getFilePath();
     std::ifstream file(filename);
-    
-    if (!file.is_open()) {
-        return "";
-    }
-    
+    if (!file.is_open()) return "";
     json j;
     file >> j;
     file.close();
-    
     return j.value("character", "");
 }
 
+// ---------- 统计（仅用户模式） ----------
 void StorageManager::updateStatsAfterAppend(const std::string& role, const std::string& content) {
+    if (filePrefix_ != "user_") return;
+    
     std::string filename = getFilePath();
     std::ifstream file(filename);
-    
-    if (!file.is_open()) {
-        return;
-    }
+    if (!file.is_open()) return;
     
     json j;
     file >> j;
     file.close();
     
-    // 确保 stats 对象存在
     if (!j.contains("stats")) {
         j["stats"] = json::object();
         j["stats"]["user_messages"] = 0;
@@ -240,23 +251,15 @@ void StorageManager::updateStatsAfterAppend(const std::string& role, const std::
         j["stats"]["character_bytes"] = 0;
     }
     
-    // 更新消息计数
     if (role == "user") {
-        j["stats"]["user_messages"] = j["stats"].value("user_messages", 0) + 1;
+        j["stats"]["user_messages"] = j["stats"]["user_messages"].get<int>() + 1;
     } else if (role == "assistant") {
-        j["stats"]["ai_messages"] = j["stats"].value("ai_messages", 0) + 1;
+        j["stats"]["ai_messages"] = j["stats"]["ai_messages"].get<int>() + 1;
     }
     
-    // 更新消息字节数
-    int current_msg_bytes = j["stats"].value("total_bytes", 0);
-    int new_msg_bytes = content.length();
-    j["stats"]["total_bytes"] = current_msg_bytes + new_msg_bytes;
+    int current_msg_bytes = j["stats"]["total_bytes"].get<int>();
+    j["stats"]["total_bytes"] = current_msg_bytes + (int)content.length();
     
-    // 加上人设的字节数
-    int char_bytes = j["stats"].value("character_bytes", 0);
-    j["stats"]["total_bytes"] = j["stats"]["total_bytes"].get<int>() + char_bytes;
-    
-    // 更新总消息数
     j["total_messages"] = j["stats"]["user_messages"].get<int>() + j["stats"]["ai_messages"].get<int>();
     j["last_update"] = time(nullptr);
     
@@ -268,66 +271,49 @@ void StorageManager::updateStatsAfterAppend(const std::string& role, const std::
 }
 
 void StorageManager::updateStatsAfterSaveCharacter(const std::string& character) {
-    // 在 saveCharacter 中已经处理，这里直接调用
     saveCharacter(character);
 }
 
 int StorageManager::getTotalUserMessages() const {
+    if (filePrefix_ != "user_") return 0;
     std::string filename = getFilePath();
     std::ifstream file(filename);
-    
-    if (!file.is_open()) {
-        return 0;
-    }
-    
+    if (!file.is_open()) return 0;
     json j;
     file >> j;
     file.close();
-    
     return j["stats"].value("user_messages", 0);
 }
 
 int StorageManager::getTotalAIMessages() const {
+    if (filePrefix_ != "user_") return 0;
     std::string filename = getFilePath();
     std::ifstream file(filename);
-    
-    if (!file.is_open()) {
-        return 0;
-    }
-    
+    if (!file.is_open()) return 0;
     json j;
     file >> j;
     file.close();
-    
     return j["stats"].value("ai_messages", 0);
 }
 
 int StorageManager::getTotalCharacters() const {
+    if (filePrefix_ != "user_") return 0;
     std::string filename = getFilePath();
     std::ifstream file(filename);
-    
-    if (!file.is_open()) {
-        return 0;
-    }
-    
+    if (!file.is_open()) return 0;
     json j;
     file >> j;
     file.close();
-    
     return j["stats"].value("character_bytes", 0);
 }
 
 int StorageManager::getTotalBytes() const {
+    if (filePrefix_ != "user_") return 0;
     std::string filename = getFilePath();
     std::ifstream file(filename);
-    
-    if (!file.is_open()) {
-        return 0;
-    }
-    
+    if (!file.is_open()) return 0;
     json j;
     file >> j;
     file.close();
-    
     return j["stats"].value("total_bytes", 0);
 }

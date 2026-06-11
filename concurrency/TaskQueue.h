@@ -1,13 +1,11 @@
 #ifndef TASK_QUEUE_H
 #define TASK_QUEUE_H
-
 #include <queue>
 #include <mutex>
 #include <thread>
 #include <functional>
 #include <atomic>
 #include <chrono>
-
 class TaskQueue
 {
 public:
@@ -48,5 +46,4 @@ private:
     std::queue<Task> tasks_;
     mutable std::mutex mutex_;
 };
-
 #endif
